@@ -10,7 +10,7 @@ import dill
 import math
 import wandb.sdk.data_types.video as wv
 from diffusion_policy.gym_util.async_vector_env import AsyncVectorEnv
-# from diffusion_policy.gym_util.sync_vector_env import SyncVectorEnv
+from diffusion_policy.gym_util.sync_vector_env import SyncVectorEnv
 from diffusion_policy.gym_util.multistep_wrapper import MultiStepWrapper
 from diffusion_policy.gym_util.video_recording_wrapper import VideoRecordingWrapper, VideoRecorder
 from diffusion_policy.model.common.rotation_transformer import RotationTransformer
@@ -203,8 +203,8 @@ class RobomimicLowdimRunner(BaseLowdimRunner):
             env_prefixs.append('test/')
             env_init_fn_dills.append(dill.dumps(init_fn))
         
-        env = AsyncVectorEnv(env_fns)
-        # env = SyncVectorEnv(env_fns)
+        # env = AsyncVectorEnv(env_fns)
+        env = SyncVectorEnv(env_fns)
 
         self.env_meta = env_meta
         self.env = env
@@ -306,7 +306,6 @@ class RobomimicLowdimRunner(BaseLowdimRunner):
                 done = np.all(done)
                 past_action = action
 
-                # update pbar
                 pbar.update(action.shape[1])
             pbar.close()
 
