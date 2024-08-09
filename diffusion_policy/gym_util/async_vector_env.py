@@ -119,7 +119,7 @@ class AsyncVectorEnv(VectorEnv):
                     self.single_observation_space, n=self.num_envs, ctx=ctx
                 )
                 self.observations = read_from_shared_memory(
-                    _obs_buffer, self.single_observation_space, n=self.num_envs
+                    self.single_observation_space, _obs_buffer, n=self.num_envs
                 )
             except CustomSpaceError:
                 raise ValueError(
