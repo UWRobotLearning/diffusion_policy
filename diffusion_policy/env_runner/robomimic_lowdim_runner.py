@@ -65,7 +65,8 @@ class RobomimicLowdimRunner(BaseLowdimRunner):
             past_action=False,
             abs_action=False,
             tqdm_interval_sec=5.0,
-            n_envs=None
+            n_envs=None,
+            debug=False,
         ):
         """
         Assuming:
@@ -203,8 +204,10 @@ class RobomimicLowdimRunner(BaseLowdimRunner):
             env_prefixs.append('test/')
             env_init_fn_dills.append(dill.dumps(init_fn))
         
-        # env = AsyncVectorEnv(env_fns)
-        env = SyncVectorEnv(env_fns)
+        if debug:
+            env = SyncVectorEnv(env_fns)
+        else:
+            env = AsyncVectorEnv(env_fns)
 
         self.env_meta = env_meta
         self.env = env
