@@ -189,7 +189,7 @@ class RobomimicLowdimRunner(BaseLowdimRunner):
                 env.env.video_recoder.stop()
                 env.env.file_path = None
                 if enable_render:
-                    filthis_init_fnsename = pathlib.Path(output_dir).joinpath(
+                    filename = pathlib.Path(output_dir).joinpath(
                         'media', wv.util.generate_id() + ".mp4")
                     filename.parent.mkdir(parents=False, exist_ok=True)
                     filename = str(filename)
