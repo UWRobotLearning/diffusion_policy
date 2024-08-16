@@ -113,16 +113,17 @@ class TrainDiffusionUnetLowdimWorkspace(BaseWorkspace):
         assert isinstance(env_runner, BaseLowdimRunner)
 
         # configure logging
-        wandb_run = wandb.init(
-            dir=str(self.output_dir),
-            config=OmegaConf.to_container(cfg, resolve=True),
-            **cfg.logging
-        )
-        wandb.config.update(
-            {
-                "output_dir": self.output_dir,
-            }
-        )
+        if not self.debug:
+            wandb_run = wandb.init(
+                dir=str(self.output_dir),
+                config=OmegaConf.to_container(cfg, resolve=True),
+                **cfg.logging
+            )
+            wandb.config.update(
+                {
+                    "output_dir": self.output_dir,
+                }
+            )
 
         # configure checkpoint
         topk_manager = TopKCheckpointManager(
@@ -192,8 +193,9 @@ class TrainDiffusionUnetLowdimWorkspace(BaseWorkspace):
 
                         is_last_batch = (batch_idx == (len(train_dataloader)-1))
                         if not is_last_batch:
+                            if not self.debug:
+                                wandb_run.log(step_log, step=self.global_step)
                             # log of last step is combined with validation and rollout
-                            wandb_run.log(step_log, step=self.global_step)
                             json_logger.log(step_log)
                             self.global_step += 1
 
@@ -289,7 +291,8 @@ class TrainDiffusionUnetLowdimWorkspace(BaseWorkspace):
 
                 # end of epoch
                 # log of last step is combined with validation and rollout
-                wandb_run.log(step_log, step=self.global_step)
+                if not self.debug:
+                    wandb_run.log(step_log, step=self.global_step)
                 json_logger.log(step_log)
                 self.global_step += 1
                 self.epoch += 1

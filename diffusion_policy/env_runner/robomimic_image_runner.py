@@ -219,7 +219,7 @@ class RobomimicImageRunner(BaseImageRunner):
         if debug:
             env = SyncVectorEnv(env_fns)
         else:
-            env = AsyncVectorEnv(env_fns)
+            env = AsyncVectorEnv(env_fns, context='forkserver')
 
         self.env_meta = env_meta
         self.env = env

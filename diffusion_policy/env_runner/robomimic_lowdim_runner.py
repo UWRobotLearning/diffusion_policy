@@ -90,7 +90,7 @@ class RobomimicLowdimRunner(BaseLowdimRunner):
 
         if n_envs is None:
             n_envs = n_train + n_test
-
+ 
         # handle latency step
         # to mimic latency, we request n_latency_steps additional steps 
         # of past observations, and the discard the last n_latency_steps

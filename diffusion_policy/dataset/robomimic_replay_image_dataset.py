@@ -44,7 +44,8 @@ class RobomimicReplayImageDataset(BaseImageDataset):
             use_legacy_normalizer=False,
             use_cache=False,
             seed=42,
-            val_ratio=0.0
+            val_ratio=0.0,
+            **kwargs,
         ):
         rotation_transformer = RotationTransformer(
             from_rep='axis_angle', to_rep=rotation_rep)
@@ -266,7 +267,6 @@ def _convert_robomimic_to_replay(store, shape_meta, dataset_path, abs_action, ro
     root = zarr.group(store)
     data_group = root.require_group('data', overwrite=True)
     meta_group = root.require_group('meta', overwrite=True)
-
     with h5py.File(dataset_path) as file:
         # count total steps
         demos = file['data']
@@ -319,7 +319,6 @@ def _convert_robomimic_to_replay(store, shape_meta, dataset_path, abs_action, ro
                 return True
             except Exception as e:
                 return False
-        
         with tqdm(total=n_steps*len(rgb_keys), desc="Loading image data", mininterval=1.0) as pbar:
             # one chunk per thread, therefore no synchronization needed
             with concurrent.futures.ThreadPoolExecutor(max_workers=n_workers) as executor:

@@ -18,6 +18,7 @@ class BaseWorkspace:
         self.cfg = cfg
         self._output_dir = output_dir
         self._saving_thread = None
+        self.debug = cfg.debug
 
     @property
     def output_dir(self):
