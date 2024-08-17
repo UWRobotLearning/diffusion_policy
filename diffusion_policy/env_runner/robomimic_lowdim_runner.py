@@ -22,7 +22,7 @@ from diffusion_policy.env.robomimic.robomimic_lowdim_wrapper import RobomimicLow
 import robomimic.utils.file_utils as FileUtils
 import robomimic.utils.env_utils as EnvUtils
 import robomimic.utils.obs_utils as ObsUtils
-
+torch.utils.cpp_extension._check_cuda_version
 
 def create_env(env_meta, obs_keys):
     ObsUtils.initialize_obs_modality_mapping_from_dict(
