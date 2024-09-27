@@ -61,12 +61,19 @@ class RobomimicReplayImageDataset(BaseImageDataset):
                     try:
                         print('Cache does not exist. Creating!')
                         # store = zarr.DirectoryStore(cache_zarr_path)
-                        replay_buffer = _convert_robomimic_to_replay(
+                        replay_buffer, failed, root = _convert_robomimic_to_replay(
                             store=zarr.MemoryStore(), 
                             shape_meta=shape_meta, 
                             dataset_path=dataset_path, 
                             abs_action=abs_action, 
                             rotation_transformer=rotation_transformer)
+                        if failed:
+                            print(len(failed))
+                            replay_buffer = _redo_failures(
+                                failures=failed, 
+                                root=root, 
+                                shape_meta=shape_meta, 
+                                dataset_path=dataset_path)
                         print('Saving cache to disk.')
                         with zarr.ZipStore(cache_zarr_path) as zip_store:
                             replay_buffer.save_to_store(
@@ -312,17 +319,21 @@ def _convert_robomimic_to_replay(store, shape_meta, dataset_path, abs_action, ro
             )
         
         def img_copy(zarr_arr, zarr_idx, hdf5_arr, hdf5_idx):
-            try:
-                zarr_arr[zarr_idx] = hdf5_arr[hdf5_idx]
-                # make sure we can successfully decode
-                _ = zarr_arr[zarr_idx]
-                return True
-            except Exception as e:
-                return False
+            success = False
+            while not success:
+                try:
+                    zarr_arr[zarr_idx] = hdf5_arr[hdf5_idx]
+                    # make sure we can successfully decode
+                    _ = zarr_arr[zarr_idx]
+                    return True
+                except Exception as e:
+                    return False
+            
         with tqdm(total=n_steps*len(rgb_keys), desc="Loading image data", mininterval=1.0) as pbar:
             # one chunk per thread, therefore no synchronization needed
             with concurrent.futures.ThreadPoolExecutor(max_workers=n_workers) as executor:
                 futures = set()
+                failed = []
                 for key in rgb_keys:
                     data_key = 'obs/' + key
                     shape = tuple(shape_meta['obs'][key]['shape'])
@@ -339,27 +350,77 @@ def _convert_robomimic_to_replay(store, shape_meta, dataset_path, abs_action, ro
                         demo = demos[f'demo_{episode_idx}']
                         hdf5_arr = demo['obs'][key]
                         for hdf5_idx in range(hdf5_arr.shape[0]):
-                            if len(futures) >= max_inflight_tasks:
-                                # limit number of inflight tasks
-                                completed, futures = concurrent.futures.wait(futures, 
-                                    return_when=concurrent.futures.FIRST_COMPLETED)
-                                for f in completed:
-                                    if not f.result():
-                                        raise RuntimeError('Failed to encode image!')
-                                pbar.update(len(completed))
-
                             zarr_idx = episode_starts[episode_idx] + hdf5_idx
-                            futures.add(
-                                executor.submit(img_copy, 
-                                    img_arr, zarr_idx, hdf5_arr, hdf5_idx))
-                completed, futures = concurrent.futures.wait(futures)
-                for f in completed:
-                    if not f.result():
-                        raise RuntimeError('Failed to encode image!')
-                pbar.update(len(completed))
+                            result = img_copy(img_arr, zarr_idx, hdf5_arr, hdf5_idx)
+                            attempts = 0
+                            max_attempts = 0
+                            while not result and attempts < max_attempts:
+                                print(f' Retrying {key} {zarr_idx} attempts {attempts} / {max_attempts}')
+                                result = img_copy(img_arr, zarr_idx, hdf5_arr, hdf5_idx)
+                                attempts += 1
+                            if not result:
+                                failed.append(
+                                    (
+                                        key,
+                                        episode_idx,
+                                        zarr_idx,
+                                        hdf5_idx
+                                    )
+                                )
+                                # raise RuntimeError('Failed to encode image!')
+                                
+                            pbar.update(1)
+                            # if len(futures) >= max_inflight_tasks:
+                            #     # limit number of inflight tasks
+                            #     completed, futures = concurrent.futures.wait(futures, 
+                            #         return_when=concurrent.futures.FIRST_COMPLETED)
+                            #     for f in completed:
+                            #         if f.result() is not True:
+                            #             raise RuntimeError(f'Failed to encode image! {f.result()}')
+                            #     pbar.update(len(completed))
+
+                            # zarr_idx = episode_starts[episode_idx] + hdf5_idx
+                            # futures.add(
+                            #     executor.submit(img_copy, 
+                            #         img_arr, zarr_idx, hdf5_arr, hdf5_idx))
+                # completed, futures = concurrent.futures.wait(futures)
+                # for f in completed:
+                #     if not f.result():
+                #         raise RuntimeError('Failed to encode image!')
+                # pbar.update(len(completed))
 
     replay_buffer = ReplayBuffer(root)
-    return replay_buffer
+    if failed:
+        return replay_buffer, failed, root
+    return replay_buffer, [], None
+
+def _redo_failures(failures, root, shape_meta, dataset_path):
+    data_group = root.data
+    
+    with h5py.File(dataset_path) as file:
+        demos = file['data']
+        
+        def img_copy(zarr_arr, zarr_idx, hdf5_arr, hdf5_idx):
+            success = False
+            while not success:
+                try:
+                    zarr_arr[zarr_idx] = hdf5_arr[hdf5_idx]
+                    # make sure we can successfully decode
+                    _ = zarr_arr[zarr_idx]
+                    return True
+                except Exception as e:
+                    return False
+
+        with tqdm(total=len(failures), desc="Retrying failures", mininterval=1.0) as pbar:
+            for key, episode_idx, zarr_idx, hdf5_idx in failures:
+                demo = demos[f'demo_{episode_idx}']
+                hdf5_arr = demo['obs'][key]
+                img_arr = data_group[key]
+                result = img_copy(img_arr, zarr_idx, hdf5_arr, hdf5_idx)
+                if not result:
+                    raise RuntimeError('Failed to encode image!')
+                pbar.update(1)
+    return ReplayBuffer(root)
 
 def normalizer_from_stat(stat):
     max_abs = np.maximum(stat['max'].max(), np.abs(stat['min']).max())
