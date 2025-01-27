@@ -45,10 +45,13 @@ class RobomimicReplayImageDataset(BaseImageDataset):
             use_cache=False,
             seed=42,
             val_ratio=0.0,
+            extra_info=False,
             **kwargs,
         ):
         rotation_transformer = RotationTransformer(
             from_rep='axis_angle', to_rep=rotation_rep)
+        
+        self.extra_info = extra_info
 
         replay_buffer = None
         if use_cache:
@@ -66,7 +69,9 @@ class RobomimicReplayImageDataset(BaseImageDataset):
                             shape_meta=shape_meta, 
                             dataset_path=dataset_path, 
                             abs_action=abs_action, 
-                            rotation_transformer=rotation_transformer)
+                            rotation_transformer=rotation_transformer,
+                            extra_info=extra_info
+                        )
                         if failed:
                             print(len(failed))
                             replay_buffer = _redo_failures(
@@ -127,6 +132,8 @@ class RobomimicReplayImageDataset(BaseImageDataset):
             pad_after=pad_after,
             episode_mask=train_mask,
             key_first_k=key_first_k)
+        
+        # import ipdb; ipdb.set_trace()
         
         self.replay_buffer = replay_buffer
         self.sampler = sampler
@@ -220,11 +227,13 @@ class RobomimicReplayImageDataset(BaseImageDataset):
         for key in self.lowdim_keys:
             obs_dict[key] = data[key][T_slice].astype(np.float32)
             del data[key]
-
+            
         torch_data = {
             'obs': dict_apply(obs_dict, torch.from_numpy),
             'action': torch.from_numpy(data['action'].astype(np.float32))
         }
+        if self.extra_info:
+            torch_data['rewards'] = torch.from_numpy(data['rewards'].astype(np.float32))
         return torch_data
 
 
@@ -252,7 +261,7 @@ def _convert_actions(raw_actions, abs_action, rotation_transformer):
 
 
 def _convert_robomimic_to_replay(store, shape_meta, dataset_path, abs_action, rotation_transformer, 
-        n_workers=None, max_inflight_tasks=None):
+        n_workers=None, max_inflight_tasks=None, extra_info=False):
     if n_workers is None:
         n_workers = multiprocessing.cpu_count()
     if max_inflight_tasks is None:
@@ -289,12 +298,21 @@ def _convert_robomimic_to_replay(store, shape_meta, dataset_path, abs_action, ro
         episode_starts = [0] + episode_ends[:-1]
         _ = meta_group.array('episode_ends', episode_ends, 
             dtype=np.int64, compressor=None, overwrite=True)
-
+        
+        extra_keys = ['action']
+        if extra_info:
+            extra_keys.extend(['rewards'])
         # save lowdim data
-        for key in tqdm(lowdim_keys + ['action'], desc="Loading lowdim data"):
+        for key in tqdm(lowdim_keys + extra_keys, desc="Loading lowdim data"):
             data_key = 'obs/' + key
             if key == 'action':
                 data_key = 'actions'
+            elif key == 'rewards':
+                data_key = 'rewards'
+            elif key == 'terminals':
+                data_key = 'terminals'
+            elif key == 'valids':
+                data_key = 'valids'
             this_data = list()
             for i in range(len(demos)):
                 demo = demos[f'demo_{i}']
@@ -307,6 +325,8 @@ def _convert_robomimic_to_replay(store, shape_meta, dataset_path, abs_action, ro
                     rotation_transformer=rotation_transformer
                 )
                 assert this_data.shape == (n_steps,) + tuple(shape_meta['action']['shape'])
+            elif key in ['rewards', 'terminals', 'valids']:
+                assert this_data.shape == (n_steps,)
             else:
                 assert this_data.shape == (n_steps,) + tuple(shape_meta['obs'][key]['shape'])
             _ = data_group.array(
@@ -317,7 +337,6 @@ def _convert_robomimic_to_replay(store, shape_meta, dataset_path, abs_action, ro
                 compressor=None,
                 dtype=this_data.dtype
             )
-        
         def img_copy(zarr_arr, zarr_idx, hdf5_arr, hdf5_idx):
             success = False
             while not success:
@@ -346,9 +365,11 @@ def _convert_robomimic_to_replay(store, shape_meta, dataset_path, abs_action, ro
                         compressor=this_compressor,
                         dtype=np.uint8
                     )
+                    
                     for episode_idx in range(len(demos)):
                         demo = demos[f'demo_{episode_idx}']
                         hdf5_arr = demo['obs'][key]
+
                         for hdf5_idx in range(hdf5_arr.shape[0]):
                             zarr_idx = episode_starts[episode_idx] + hdf5_idx
                             result = img_copy(img_arr, zarr_idx, hdf5_arr, hdf5_idx)

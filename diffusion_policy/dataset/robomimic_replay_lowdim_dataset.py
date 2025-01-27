@@ -34,7 +34,11 @@ class RobomimicReplayLowdimDataset(BaseLowdimDataset):
             use_legacy_normalizer=False,
             seed=42,
             val_ratio=0.0,
-            max_train_episodes=None
+            extra_info=False,
+            max_train_episodes=None,
+            sample_goals=False,
+            p_currgoal=0.0,
+            squeeze=False,
         ):
         obs_keys = list(obs_keys)
         rotation_transformer = RotationTransformer(
@@ -45,12 +49,26 @@ class RobomimicReplayLowdimDataset(BaseLowdimDataset):
             demos = file['data']
             for i in tqdm(range(len(demos)), desc="Loading hdf5 to ReplayBuffer"):
                 demo = demos[f'demo_{i}']
-                episode = _data_to_obs(
-                    raw_obs=demo['obs'],
-                    raw_actions=demo['actions'][:].astype(np.float32),
-                    obs_keys=obs_keys,
-                    abs_action=abs_action,
-                    rotation_transformer=rotation_transformer)
+                if extra_info:
+                    episode = _data_to_obs(
+                        raw_obs=demo['obs'],
+                        raw_actions=demo['actions'][:].astype(np.float32),
+                        obs_keys=obs_keys,
+                        abs_action=abs_action,
+                        rotation_transformer=rotation_transformer,
+                        extra_info=True,
+                        raw_next_obs=demo['next_obs'],
+                        rewards=demo['rewards'],
+                    )
+                else:
+                    episode = _data_to_obs(
+                        raw_obs=demo['obs'],
+                        raw_actions=demo['actions'][:].astype(np.float32),
+                        obs_keys=obs_keys,
+                        abs_action=abs_action,
+                        rotation_transformer=rotation_transformer
+                    )
+
                 replay_buffer.add_episode(episode)
 
         val_mask = get_val_mask(
@@ -70,6 +88,9 @@ class RobomimicReplayLowdimDataset(BaseLowdimDataset):
             pad_after=pad_after,
             episode_mask=train_mask)
         
+        self.sample_goals = sample_goals
+        self.p_currgoal = p_currgoal
+        self.squeeze = squeeze
         self.replay_buffer = replay_buffer
         self.sampler = sampler
         self.abs_action = abs_action
@@ -124,7 +145,7 @@ class RobomimicReplayLowdimDataset(BaseLowdimDataset):
         return len(self.sampler)
 
     def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
-        data = self.sampler.sample_sequence(idx)
+        data = self.sampler.sample_sequence(idx, sample_goals=self.sample_goals, p_currgoal=self.p_currgoal, squeeze=self.squeeze)
         torch_data = dict_apply(data, torch.from_numpy)
         return torch_data
 
@@ -138,10 +159,30 @@ def normalizer_from_stat(stat):
         input_stats_dict=stat
     )
     
-def _data_to_obs(raw_obs, raw_actions, obs_keys, abs_action, rotation_transformer):
+def _data_to_obs(
+        raw_obs, 
+        raw_actions, 
+        obs_keys, 
+        abs_action, 
+        rotation_transformer,
+        extra_info=False,
+        raw_next_obs=None,
+        rewards=None,
+    ):
     obs = np.concatenate([
         raw_obs[key] for key in obs_keys
     ], axis=-1).astype(np.float32)
+    
+    if extra_info:
+        next_obs = np.concatenate([
+            raw_next_obs[key] for key in obs_keys
+        ], axis=-1).astype(np.float32)
+        
+        terminals = np.zeros(shape=(obs.shape[0],1), dtype=np.float32)
+        terminals[-1] = 1
+        
+        valids = np.ones(shape=(obs.shape[0],1), dtype=np.float32)
+        valids[-1] = 0
 
     if abs_action:
         is_dual_arm = False
@@ -165,4 +206,9 @@ def _data_to_obs(raw_obs, raw_actions, obs_keys, abs_action, rotation_transforme
         'obs': obs,
         'action': raw_actions
     }
+    if extra_info:
+        data['next_obs'] = next_obs
+        data['rewards'] = rewards
+        data['terminals'] = terminals
+        data['valids'] = valids
     return data

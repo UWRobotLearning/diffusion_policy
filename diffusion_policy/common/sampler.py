@@ -118,11 +118,20 @@ class SequenceSampler:
     def __len__(self):
         return len(self.indices)
         
-    def sample_sequence(self, idx):
+    def sample_sequence(self, idx, sample_goals=False, p_currgoal=0.0, squeeze=False):
         buffer_start_idx, buffer_end_idx, sample_start_idx, sample_end_idx \
             = self.indices[idx]
         result = dict()
-        for key in self.keys:
+        if sample_goals:
+            ep_idx = np.searchsorted(self.replay_buffer.episode_ends, buffer_start_idx, side='right')
+            ep_end_idx = self.replay_buffer.episode_ends[ep_idx]
+            actor_goal_idx = self.sample_goal(buffer_start_idx, ep_end_idx, p_currgoal)
+            value_goal_idx = self.sample_goal(buffer_start_idx, ep_end_idx, p_currgoal)
+            actor_goal = self.replay_buffer['obs'][actor_goal_idx]
+            value_goal = self.replay_buffer['obs'][value_goal_idx]
+            result['actor_goals'] = actor_goal
+            result['value_goals'] = value_goal
+        for key in self.keys: 
             input_arr = self.replay_buffer[key]
             # performance optimization, avoid small allocation if possible
             if key not in self.key_first_k:
@@ -150,4 +159,20 @@ class SequenceSampler:
                     data[sample_end_idx:] = sample[-1]
                 data[sample_start_idx:sample_end_idx] = sample
             result[key] = data
+        if squeeze:
+            # remove first dimension if it is 1
+            for key in result:
+                if result[key].shape[0] == 1:
+                    result[key] = result[key][0]
+                    if not isinstance(result[key], np.ndarray):
+                        result[key] = np.array(result[key])
         return result
+
+    def sample_goal(self, start_idx, end_idx, p_currgoal):
+        if start_idx + 1 == end_idx:
+            return np.array([start_idx])
+        if np.random.rand() < p_currgoal:
+            goal_idx_sample = np.array([start_idx])
+        else:
+            goal_idx_sample = np.random.randint(low=start_idx + 1, high=end_idx, size=1)
+        return goal_idx_sample
